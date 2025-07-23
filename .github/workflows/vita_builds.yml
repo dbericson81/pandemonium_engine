@@ -4,10 +4,9 @@ on: [push, pull_request]
 env:
   GODOT_BRANCH: 3.x
   VITASDK_DIR: /usr/local/vitasdk
-  VITA_SDK_URL: https://github.com/vitasdk/buildscripts/releases/download/softfp-linux-v2.228
-  VITA_SDK_TAR: vitasdk-x86_64-linux-gnu-2022-08-14_14-50-39.tar.bz2
   VDPM_COMMIT: 426032a2fd05300cf9ef04e5f691f07f642c14cf
   VITA_PACKAGES_EXTRA_COMMIT: 6000b5630c3a7fc2fb368293dd35560bd2e72e0f
+  EUID: 1
 
 concurrency:
   group: ci-${{ github.actor }}-${{ github.head_ref || github.run_number }}-${{ github.ref }}-vita
@@ -42,30 +41,24 @@ jobs:
             libxinerama-dev libxrender-dev libxrandr-dev libgl1-mesa-dev libglu1-mesa-dev \
             git-core python3 make autoconf texinfo bison flex libtool
 
-      - name: Install VitaSDK (softfp v2.228 fat tarball)
+      - name: Install VitaSDK (Fat Build with All Packages)
         run: |
           sudo rm -rf $VITASDK_DIR
-          sudo mkdir -p $VITASDK_DIR
-          wget -q "$VITA_SDK_URL/$VITA_SDK_TAR" -O sdk.tar.bz2
-          sudo tar --strip-components=1 -xjf sdk.tar.bz2 -C $VITASDK_DIR
-          sudo chown -R $USER:$USER $VITASDK_DIR
-          echo "VITASDK=$VITASDK_DIR" >> $GITHUB_ENV
-          echo "$VITASDK_DIR/bin" >> $GITHUB_PATH
-          export PATH=$VITASDK_DIR/bin:$PATH
-          arm-vita-eabi-gcc --version
-
-      - name: Clone vdpm and install `vita-rss-libdl`
-        run: |
-          export PATH=$VITASDK_DIR/bin:$PATH
           git clone https://github.com/vitasdk/vdpm
           cd vdpm
           git checkout $VDPM_COMMIT
-          chmod +x vdpm
-          # Install the Vita-libdl stub
-          ./vdpm -f vita-rss-libdl
-          cd ..
+          export VITASDK=$VITASDK_DIR
+          echo "VITASDK=$VITASDK_DIR" >> $GITHUB_ENV
+          echo "$VITASDK_DIR/bin" >> $GITHUB_PATH
+          export PATH=$VITASDK_DIR/bin:$PATH
+          echo "🔧 Bootstrapping VitaSDK..."
+          ./bootstrap-vitasdk.sh
+          echo "📦 Installing ALL VitaSDK packages..."
+          ./install-all.sh
+          echo "✅ VitaSDK installation complete"
+          arm-vita-eabi-gcc --version
 
-      - name: Clone vita-packages-extra and build PVR_PSP2
+      - name: Install Vita Packages Extra (PVR_PSP2)
         run: |
           export PATH=$VITASDK_DIR/bin:$PATH
           git clone https://github.com/isage/vita-packages-extra
@@ -87,10 +80,11 @@ jobs:
         run: |
           export PATH=$VITASDK_DIR/bin:$PATH
           export SCONS_CACHE_DIR="$GITHUB_WORKSPACE/.scons-cache"
+          echo "🔨 Building PS Vita export template with all dependencies available"
           scons \
             platform=vita target=release tools=false \
             verbose=no warnings=no werror=no debug_symbols=no \
-            use_rtti=True disable_gles3=True \
+            use_rtti=True disable_gles3=True disable_exceptions=yes \
             cache_dir=$SCONS_CACHE_DIR \
             builtin_zstd=no builtin_zlib=no builtin_pcre2=yes builtin_libdl=no \
             extra_include_dirs=$VITASDK_DIR/arm-vita-eabi/include \
@@ -109,6 +103,11 @@ jobs:
             module_webm_enabled=no module_webp_enabled=no \
             module_webrtc_enabled=no module_websocket_enabled=no \
             module_xatlas_unwrap_enabled=no \
+            module_voxelman_enabled=no \
+            module_terraman_enabled=no \
+            module_terraman_2d_enabled=no \
+            module_props_enabled=no \
+            module_props_2d_enabled=no \
             CC="arm-vita-eabi-gcc -marm -Wno-psabi" \
             CXX="arm-vita-eabi-g++ -marm -Wno-psabi" \
             LINK="arm-vita-eabi-g++ -marm -Wno-psabi" \
@@ -121,8 +120,9 @@ jobs:
           cp godot.vita.opt.32 vita_release_stripped
           arm-vita-eabi-strip -g vita_release_stripped
           vita-elf-create vita_release_stripped vita_release.velf
+          echo "✅ VELF created successfully"
 
-      - name: Package PS Vita template
+      - name: Package PS Vita Template
         if: steps.compile.outcome == 'success'
         run: |
           mkdir -p template_build/vita_release/module template_build/vita_release/sce_sys/livearea/contents
@@ -141,6 +141,7 @@ jobs:
           zip -r ../vita_release.zip vita_release
           cd ..
           zip -r vita-template.zip vita_release.zip
+          echo "✅ Template packaged: vita-template.zip"
 
       - name: Save SCons cache
         uses: ./.github/actions/godot-cache-save
@@ -148,7 +149,7 @@ jobs:
           cache-name: vita-template
         continue-on-error: true
 
-      - name: Upload artifacts
+      - name: Upload PS Vita Template
         uses: actions/upload-artifact@v4
         with:
           name: vita-template-${{ github.sha }}
@@ -167,3 +168,5 @@ jobs:
           ls -1 $VITASDK_DIR/arm-vita-eabi/include | head -20
           echo "=== SDK Libraries ==="
           ls -1 $VITASDK_DIR/arm-vita-eabi/lib | head -20
+          echo "=== Installed Packages ==="
+          find $VITASDK_DIR/arm-vita-eabi/lib -name "*.a" | wc -l
