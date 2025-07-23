@@ -20,7 +20,7 @@ jobs:
     name: Vita Template Build
 
     steps:
-      # 1. Checkout repo & submodules
+      # 1. Checkout code & submodules
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -37,7 +37,7 @@ jobs:
       - name: Setup Python & SCons
         uses: ./.github/actions/godot-deps
 
-      # 4. Install host build dependencies
+      # 4. Install system dependencies
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
@@ -47,7 +47,7 @@ jobs:
             libxinerama-dev libxrender-dev libxrandr-dev libgl1-mesa-dev libglu1-mesa-dev \
             git-core python3 make autoconf texinfo bison flex libtool
 
-      # 5. Install VitaSDK (softfp v2.228 fat tarball)
+      # 5. Install softfp v2.228 VitaSDK (full fat tarball)
       - name: Install VitaSDK (softfp v2.228)
         run: |
           sudo rm -rf $VITASDK_DIR
@@ -60,14 +60,25 @@ jobs:
           export PATH=$VITASDK_DIR/bin:$PATH
           arm-vita-eabi-gcc --version
 
-      # 6. Install Vita Packages Extra (PVR_PSP2)
-      - name: Install vita-packages-extra
+      # 6. Clone vdpm and vita-packages-extra, build PVR_PSP2
+      - name: Install vita-packages-extra (with vdpm)
         run: |
           export PATH=$VITASDK_DIR/bin:$PATH
+
+          # Clone vdpm and pin to 2024 commit
+          git clone https://github.com/vitasdk/vdpm
+          cd vdpm
+          git checkout $VDPM_COMMIT
+          chmod +x vdpm
+          cd ..
+
+          # Clone vita-packages-extra
           git clone https://github.com/isage/vita-packages-extra
           cd vita-packages-extra
           git checkout $VITA_PACKAGES_EXTRA_COMMIT
           cd pvr_psp2
+
+          # Build and install PVR_PSP2 module
           vita-makepkg
           ../../vdpm/vdpm *-arm.tar.xz
           echo "✅ vita-packages-extra installed"
@@ -85,7 +96,7 @@ jobs:
         run: |
           export PATH=$VITASDK_DIR/bin:$PATH
           export SCONS_CACHE_DIR="$GITHUB_WORKSPACE/.scons-cache"
-          echo "🔨 Building minimal Vita export"
+          echo "🔨 Building minimal Vita export template"
           if scons \
                platform=vita target=release tools=false \
                verbose=no warnings=no werror=no debug_symbols=no \
@@ -119,7 +130,7 @@ jobs:
             exit 1
           fi
 
-      # 9. Manual VELF creation
+      # 9. Manual VELF Creation
       - name: Manual VELF Creation
         if: env.BUILD_RESULT == 'success'
         run: |
@@ -127,16 +138,15 @@ jobs:
           cp godot.vita.opt.32 vita_release_stripped
           arm-vita-eabi-strip -g vita_release_stripped
           vita-elf-create vita_release_stripped vita_release.velf
+          echo "✅ VELF created"
 
       # 10. Package PS Vita template
       - name: Package PS Vita template
         if: env.BUILD_RESULT == 'success'
         run: |
-          mkdir -p template_build/vita_release/module \
-                   template_build/vita_release/sce_sys/livearea/contents
+          mkdir -p template_build/vita_release/module template_build/vita_release/sce_sys/livearea/contents
           cp temp-build/vita_release.velf template_build/vita_release/
-          vita-make-fself temp-build/vita_release.velf \
-                          template_build/vita_release/eboot.bin
+          vita-make-fself temp-build/vita_release.velf template_build/vita_release/eboot.bin
           find vita-packages-extra/pvr_psp2/dist -name '*.suprx' \
             -exec cp {} template_build/vita_release/module/ \;
           cat > template_build/vita_release/sce_sys/livearea/contents/template.xml << 'EOF'
@@ -146,11 +156,12 @@ jobs:
             <gate><startup-image>startup.png</startup-image></gate>
           </livearea>
           EOF
-          touch template_build/vita_release/sce_sys/param.sfo \
-                template_build/vita_release/sce_sys/icon0.png
+          touch template_build/vita_release/sce_sys/param.sfo template_build/vita_release/sce_sys/icon0.png
           cd template_build
           zip -r ../vita_release.zip vita_release
-          zip -r ../vita-template.zip vita_release.zip
+          cd ..
+          zip -r vita-template.zip vita_release.zip
+          echo "✅ Complete template: vita-template.zip"
 
       # 11. Save SCons cache
       - name: Save SCons cache
@@ -168,7 +179,7 @@ jobs:
             vita-template.zip
             vita_release.zip
 
-      # 13. Debug Info
+      # 13. Debug info
       - name: Debug Info
         if: always()
         run: |
