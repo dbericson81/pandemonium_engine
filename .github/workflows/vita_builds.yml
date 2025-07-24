@@ -8,6 +8,9 @@ env:
   VITASDK: /usr/local/vitasdk
   VDPM_COMMIT: 426032a2fd05300cf9ef04e5f691f07f642c14cf
   VITA_PACKAGES_EXTRA_COMMIT: 6000b5630c3a7fc2fb368293dd35560bd2e72e0f
+  # Force bootstrap to use March 2025 instead of latest
+  VITASDK_AUTOBUILD_BASE_URL: https://github.com/vitasdk/autobuilds/releases/download/master-linux-v2.529
+  VITASDK_AUTOBUILD_TAR: vitasdk-x86_64-linux-gnu-2025-03-11_15-12-52.tar.bz2
   EUID: 1
 
 concurrency:
@@ -47,6 +50,14 @@ jobs:
           
           cd vdpm
           git checkout $VDPM_COMMIT
+          
+          # Override which VitaSDK autobuild gets downloaded
+          export BASE_URL=$VITASDK_AUTOBUILD_BASE_URL
+          export TAR_NAME=$VITASDK_AUTOBUILD_TAR
+          
+          echo "🔧 Installing VitaSDK March 2025 (not latest July 2025)"
+          echo "Using: $BASE_URL/$TAR_NAME"
+          
           ./bootstrap-vitasdk.sh
           ./install-all.sh
           export PATH=$VITASDK/bin:$PATH
